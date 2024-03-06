@@ -145,7 +145,8 @@ def calculate_step_integral(dfz, step_times, calculate_theoretical: bool = False
             step_sum.append({'step_time_start': start.round(2), 
                             'step_time_end': end.round(2), 
                             'step_delta': end-start.round(2),
-                            'signal_average': interval_mean.round(2)})
+                            'signal_average': interval_mean.round(2),
+                            'signal_sum': interval_sum.round(2)})
     step_sum_df = pd.DataFrame(step_sum)
 
     return step_sum_df
