@@ -30,8 +30,8 @@ def get_list_of_files(customer):
             notes.append(notenow)
 
     dffiles = pd.DataFrame({'file':filenames, 'date':dates, 'note':notes})
-    #i_list = dffiles.index[dffiles.date.str.contains('000')].tolist()
-    #dffiles.drop(i_list, inplace = True)
+    i_list = dffiles.index[dffiles.date.astype(str).str.contains('000')].tolist()
+    dffiles.drop(i_list, inplace = True)
     dffiles['date'] = pd.to_datetime(dffiles.date)
     dffiles.sort_values(by='date', inplace = True)
     dffiles.reset_index(inplace = True, drop = True)
