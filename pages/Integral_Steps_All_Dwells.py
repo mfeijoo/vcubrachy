@@ -17,21 +17,9 @@ def init_variables():
         st.session_state.filename_change = True 
 
 
-@st.cache_data
-def file_loader(file_list: list=[]):
-    if "processed_files" not in st.session_state:
-
-        processed_files = load_files(file_list)
-        # print()
-        # print()
-        # print(processed_files)
-        # print()
-        # print()
-        st.session_state.processed_files = processed_files
-
 
 @st.cache_data(show_spinner="Loading data...")
-def load_files(file_list: list=[]) -> pd.DataFrame:
+def load_files() -> pd.DataFrame:
     """
     File list clean up procedure and 
 
@@ -203,9 +191,9 @@ def filename_change():
     st.session_state.filename_change = True
 
 
-def main():
+def main(filelist):
     filename = st.selectbox(label='File selection', 
-                            options=st.session_state.processed_files.file,
+                            options=filelist,
                             index=0,
                             key="selected_file",
                             on_change=filename_change,
@@ -248,8 +236,8 @@ if __name__== "__main__":
     times = time.time()
     #file_list = glob('vcubrachy*all*.csv')
     init_variables()
-    file_loader()
-    main()
+    dffiles = load_files()
+    main(filelist = dffiles)
     timee = time.time()
 
     print()

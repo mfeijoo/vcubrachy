@@ -18,20 +18,9 @@ def init_variables():
         st.session_state.filename_change = True 
 
 
-@st.cache_data
-def file_loader(file_list: list=[]):
-    if "processed_files" not in st.session_state:
-
-        processed_files = load_files(file_list)
-        # print()
-        # print()
-        # print(processed_files)
-        # print()
-        # print()
-        st.session_state.processed_files = processed_files
 
 @st.cache_data(show_spinner="Loading data...")
-def load_files(file_list: list=[]) -> pd.DataFrame:
+def load_files() -> pd.DataFrame:
     """
     File list clean up procedure and 
 
@@ -157,7 +146,8 @@ def calculate_step_integral(dfz, step_times, calculate_theoretical: bool = False
             step_sum.append({'step_time_start': start.round(2), 
                             'step_time_end': end.round(2), 
                             'step_delta': end-start.round(2),
-                            'signal_average': interval_mean.round(2)})
+                            'signal_average': interval_mean.round(2),
+                            'signal_sum': interval_sum.round(2)})
     step_sum_df = pd.DataFrame(step_sum)
 
     return step_sum_df
@@ -224,9 +214,9 @@ def align_signal(dfg, step_difference, add: bool = True):
     return dfg 
  
 
-def main():
+def main(filelist):
     filename = st.multiselect(label='Select Files', 
-                              options=st.session_state.processed_files.file,
+                              options=filelist,
                               key="selected_file",
                               max_selections=2,
                               placeholder="Max 2 Files",
@@ -302,8 +292,8 @@ if __name__== "__main__":
     #file_list = glob('vcubrachy*all*.csv')
     #file_list = [i for i in filenames if 'all' in i]
     init_variables()
-    file_loader()
-    main()
+    dffiles = load_files()
+    main(filelist = dffiles)
     timee = time.time()
 
     print()
