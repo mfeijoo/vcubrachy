@@ -10,11 +10,8 @@ import plotly.graph_objects as go
 from scipy.signal import find_peaks
 from smart_open import open
 
-st.title("Calculate Shot Integrals")
+st.title("Calculate Displacement")
 
-s3 = boto3.client('s3')
-response = s3.list_objects_v2(Bucket='vcubrachy')
-filenames = [file['Key'] for file in response.get('Contents', [])][1:]
 
 def init_variables():
     if "filename_change" not in st.session_state:
@@ -22,7 +19,7 @@ def init_variables():
 
 
 @st.cache_data
-def file_loader(file_list: list):
+def file_loader(file_list: list=[]):
     if "processed_files" not in st.session_state:
 
         processed_files = load_files(file_list)
@@ -33,9 +30,8 @@ def file_loader(file_list: list):
         # print()
         st.session_state.processed_files = processed_files
 
-
 @st.cache_data(show_spinner="Loading data...")
-def load_files(file_list: list) -> pd.DataFrame:
+def load_files(file_list: list=[]) -> pd.DataFrame:
     """
     File list clean up procedure and 
 
@@ -45,25 +41,31 @@ def load_files(file_list: list) -> pd.DataFrame:
         dffiles (pd.DataFrame): Dataframe with columns 'file', 'note', and 'datatime'
 
     """
+    s3 = boto3.client('s3')
+
+    response = s3.list_objects_v2(Bucket='vcubrachy')
+
+    filenamesbad = [file['Key'] for file in response.get('Contents', [])][1:]
+    filenames = [i for i in filenamesbad if 'all' in i]
+    #filenames = glob(f'{customer}*.csv')
 
     dates = []
     notes = []
-    for file in file_list:
-        with open(file) as filenow:
-            datenow = filenow.readline()[11:-1]
+
+    for filename in filenames:
+        with open (f's3://vcubrachy/{filename}') as filenow:
+        #with open (filename) as filenow:
+            datenow = filenow.readline()[11:]
             dates.append(datenow)
-            notesnow = filenow.readline()[7:-1]
-            notes.append(notesnow)
-            filenow.close()
+            notenow = filenow.readline()[7:]
+            notes.append(notenow)
 
-    dffiles = pd.DataFrame({'file':file_list, 'date_string':dates, 'note':notes})
-    dffiles['datetime'] = pd.to_datetime(dffiles.date_string)
-    dffiles.sort_values(by='datetime', inplace=True)
+    dffiles = pd.DataFrame({'file':filenames, 'date':dates, 'note':notes})
+    i_list = dffiles.index[dffiles.date.str.contains('000')].tolist()
+    dffiles.drop(i_list, inplace = True)
+    dffiles['date'] = pd.to_datetime(dffiles.date)
+    dffiles.sort_values(by='date', inplace = True)
     dffiles.reset_index(inplace = True, drop = True)
-    dffiles.drop('date_string', inplace = True, axis = 1)
-
-    #st.write('List of Files')
-    #st.dataframe(dffiles)
 
     return dffiles
 
@@ -110,7 +112,7 @@ def locate_steps(df):
     step_idx, _ = find_peaks(x=df.ch0diff.values, height=5, distance=10)
     step_times = [df.time.values[step] for step in step_idx]
     theoretical_steps = [step_times[0]]
-    for i in range(len(step_times)): 
+    for i in range(33): 
         if i == 0:
             t_start = step_times[0]
         else:
@@ -125,11 +127,12 @@ def calculate_step_integral(dfz, step_times, calculate_theoretical: bool = False
     step_sum = []
 
     step1_time = step_times[0]
-    for (i, (start, end)) in enumerate(overlapping_step_times):
-        # Filter the DataFrame for the current interval   
-        if i == 0 and calculate_theoretical:
-            t_start = step1_time
-        if calculate_theoretical:
+        
+    if calculate_theoretical:
+        for i in range(33):
+            # Filter the DataFrame for the current interval   
+            if i == 0 and calculate_theoretical:
+                t_start = step1_time
             t_end = t_start + 5
             theoretical_mask = (dfz['time'] > t_start) & (dfz['time'] <= t_end)
             theoretical_filtered_dfz = dfz.loc[theoretical_mask]
@@ -142,8 +145,9 @@ def calculate_step_integral(dfz, step_times, calculate_theoretical: bool = False
                             'step_delta': t_end-t_start.round(2),
                             'signal_average': theoretical_interval_mean.round(2), 
                             'signal_sum': theoretical_interval_sum.round(2)})
-            t_start = t_end                
-        else:
+            t_start = t_end
+    else:
+        for start, end in overlapping_step_times:
             mask = (dfz['time'] > start) & (dfz['time'] <= end)
             filtered_dfz = dfz.loc[mask]
             
@@ -153,9 +157,7 @@ def calculate_step_integral(dfz, step_times, calculate_theoretical: bool = False
             step_sum.append({'step_time_start': start.round(2), 
                             'step_time_end': end.round(2), 
                             'step_delta': end-start.round(2),
-                            'signal_average': interval_mean.round(2),
-                            'signal_sum': interval_sum.round(2)})   
-        
+                            'signal_average': interval_mean.round(2)})
     step_sum_df = pd.DataFrame(step_sum)
 
     return step_sum_df
@@ -298,9 +300,9 @@ def main():
 if __name__== "__main__":
     times = time.time()
     #file_list = glob('vcubrachy*all*.csv')
-    file_list = [i for i in filenames if 'all' in i]
+    #file_list = [i for i in filenames if 'all' in i]
     init_variables()
-    file_loader(file_list=file_list)
+    file_loader()
     main()
     timee = time.time()
 
