@@ -9,14 +9,15 @@ from glob import glob
 
 st.title('Blue Physics Analysis')
 
-s3 = boto3.client('s3')
-
-response = s3.list_objects_v2(Bucket = 'vcubrachy')
-
 
 @st.cache_data
 def get_list_of_files(customer):
-    filenames = glob(f'{customer}*.csv')
+    s3 = boto3.client('s3')
+
+    response = s3.list_objects_v2(Bucket=f'{customer}')
+
+    filenames = [file['Key'] for file in response.get('Contents', [])][1:]
+    #filenames = glob(f'{customer}*.csv')
 
     dates = []
     notes = []
@@ -30,7 +31,7 @@ def get_list_of_files(customer):
             notes.append(notenow)
 
     dffiles = pd.DataFrame({'file':filenames, 'date':dates, 'note':notes})
-    i_list = dffiles.index[dffiles.date.astype(str).str.contains('000')].tolist()
+    i_list = dffiles.index[dffiles.date.str.contains('000')].tolist()
     dffiles.drop(i_list, inplace = True)
     dffiles['date'] = pd.to_datetime(dffiles.date)
     dffiles.sort_values(by='date', inplace = True)
