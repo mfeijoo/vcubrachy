@@ -4,46 +4,30 @@ import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 import boto3
-from glob import glob
+#from glob import glob
 import time
-import plotly.graph_objects as go
 from scipy.signal import find_peaks
 from smart_open import open
 
 st.title("Calculate Displacement")
 
 
-def init_variables():
-    if "filename_change" not in st.session_state:
-        st.session_state.filename_change = True 
-
-
-
-@st.cache_data(show_spinner="Loading data...")
-def load_files() -> pd.DataFrame:
-    """
-    File list clean up procedure and 
-
-    Args:
-        file_list (list): list of files to load
-    Returns:
-        dffiles (pd.DataFrame): Dataframe with columns 'file', 'note', and 'datatime'
-
-    """
+@st.cache_data()
+def get_list_of_files(customer):
     s3 = boto3.client('s3')
 
-    response = s3.list_objects_v2(Bucket='vcubrachy')
+    response = s3.list_objects_v2(Bucket=customer)
 
     filenamesbad = [file['Key'] for file in response.get('Contents', [])][1:]
     filenames = [i for i in filenamesbad if 'all' in i]
-    #filenames = glob(f'{customer}*.csv')
+    filenames = glob(f'{customer}*.csv')
 
     dates = []
     notes = []
 
     for filename in filenames:
-        with open (f's3://vcubrachy/{filename}') as filenow:
-        #with open (filename) as filenow:
+        #with open (f's3://vcubrachy/{filename}') as filenow:
+        with open (filename) as filenow:
             datenow = filenow.readline()[11:]
             dates.append(datenow)
             notenow = filenow.readline()[7:]
@@ -58,47 +42,34 @@ def load_files() -> pd.DataFrame:
 
     return dffiles
 
-
 @st.cache_data
-def read_dataframe(file):
+def read_dataframe(file, chunk):
     path = f's3://vcubrachy/{file}'
     df = pd.read_csv(path, skiprows = 4)
     #df = pd.read_csv(file, skiprows = 4)
-    return df
-
-
-def calculate_zeros(df: pd.DataFrame):
-    """
-    Set y-axis to zeros, chunking procedure, and differentiation for peak finding
-    #sf-comment - Needs change
-
-    """
+    #Calculate zeros
     last_time = df.iloc[-1,1]
 
     zeros = df.loc[(df.time < 1) | (df.time > last_time - 1), ['ch0', 'ch1']].mean()
     dfzeros = df.loc[:,['ch0', 'ch1']] - zeros
     dfzeros.columns = ['ch0z', 'ch1z']
     dfz = pd.concat([df, dfzeros], axis = 1)
+    dfz['charge'] = dfz.ch0z * 60/1000
 
     muestrascada = dfz.time.diff().mean()
-    dfz['chunk'] = dfz.number // int(0.3/muestrascada)
+    dfz['chunk'] = dfz.number // chunk
     group = dfz.groupby('chunk')
     dfg = group.agg({'time':np.median,
                      'ch0z':np.sum,
-                     'ch1z':np.sum})
+                     'charge':np.sum})
     
-    dfg['time_min'] = group['time'].min()
-    dfg['time_max'] = group['time'].max()
     dfg['ch0diff'] = dfg.ch0z.diff(2).abs()
 
     return dfz, dfg
 
 
-def locate_steps(df):
-    """
-    *Routine Only works with 'vcubrachych1dwellall-2.csv' file
-    """
-    step_idx, _ = find_peaks(x=df.ch0diff.values, height=5, distance=10)
+def scipy_locate_steps(df, height, distance):
+    step_idx, _ = find_peaks(x=df.ch0diff.values, height=height, distance=distance)
     step_times = [df.time.values[step] for step in step_idx]
     theoretical_steps = [step_times[0]]
     for i in range(33): 
@@ -108,7 +79,7 @@ def locate_steps(df):
             t_start += 5
             theoretical_steps.append(t_start)
 
-    return df, step_times, theoretical_steps
+    return step_times
 
 
 def calculate_step_integral(dfz, step_times, calculate_theoretical: bool = False):
@@ -129,11 +100,11 @@ def calculate_step_integral(dfz, step_times, calculate_theoretical: bool = False
             # Sum the signal values and store the result along with the interval
             theoretical_interval_sum = theoretical_filtered_dfz['ch0z'].sum()
             theoretical_interval_mean = theoretical_filtered_dfz['ch0z'].mean()
-            step_sum.append({'step_time_start': t_start.round(2), 
-                            'step_time_end': t_end.round(2),
-                            'step_delta': t_end-t_start.round(2),
-                            'signal_average': theoretical_interval_mean.round(2), 
-                            'signal_sum': theoretical_interval_sum.round(2)})
+            step_sum.append({'step_time_start': t_start, 
+                            'step_time_end': t_end,
+                            'step_delta': t_end-t_start,
+                            'signal_average': theoretical_interval_mean, 
+                            'signal_sum': theoretical_interval_sum})
             t_start = t_end
     else:
         for start, end in overlapping_step_times:
@@ -143,65 +114,43 @@ def calculate_step_integral(dfz, step_times, calculate_theoretical: bool = False
             # Sum the signal values and store the result along with the interval
             interval_sum = filtered_dfz['ch0z'].sum()
             interval_mean = filtered_dfz['ch0z'].mean()
-            step_sum.append({'step_time_start': start.round(2), 
-                            'step_time_end': end.round(2), 
-                            'step_delta': end-start.round(2),
-                            'signal_average': interval_mean.round(2),
-                            'signal_sum': interval_sum.round(2)})
+            step_sum.append({'step_time_start': start, 
+                            'step_time_end': end, 
+                            'step_delta': end-start,
+                            'signal_average': interval_mean,
+                            'signal_sum': interval_sum})
     step_sum_df = pd.DataFrame(step_sum)
 
     return step_sum_df
 
 
 @st.cache_data
-def plotly_fig1(dfg1, dfg2, step_times, theoretical_steps):
+def plotly_fig1(dfg1, dfg2, step_times, step_color):
     fig1 = go.Figure()
 
     fig1.add_trace(go.Scatter(x=dfg1['time'], 
-                              y=dfg1['ch0z'], 
+                              y=dfg1['charge'], 
                               mode='lines+markers', 
-                              name='ch0z',
+                              name='charge1',
+                              marker=dict(color="royalblue")
                               ))
-
-    fig1.add_trace(go.Scatter(x=dfg1['time'], 
-                              y=dfg1['ch1z'], 
-                              mode='lines+markers', 
-                              name='ch1z'))
     
     fig1.add_trace(go.Scatter(x=dfg2['time'], 
-                              y=dfg2['ch0z'], 
+                              y=dfg2['charge'], 
                               mode='lines+markers', 
-                              name='ch0z',
+                              name='charge2',
+                              marker=dict(color="darkred")
                               ))
 
-    fig1.add_trace(go.Scatter(x=dfg2['time'], 
-                              y=dfg2['ch1z'], 
-                              mode='lines+markers', 
-                              name='ch1z'))
-
     for step in step_times:
-        fig1.add_vline(x=step, line_dash = 'dash', line_color = 'Green', opacity = 0.5)
-        # fig1.add_trace(go.Scatter(x=[step, step], 
-        #                           y=[dfg1['ch1z'].min(), dfg1['ch0z'].max()], 
-        #                           mode='lines', 
-        #                           line=dict(color='green', width=2, dash='dash'), 
-        #                           name='calculated steps'))
-    for t_step in theoretical_steps:
-        fig1.add_vline(x=t_step, line_dash = 'dash', line_color = 'red', opacity = 0.5)
-        # fig1.add_trace(go.Scatter(x=[t_step, t_step], 
-        #                           y=[dfg1['ch1z'].min(), dfg1['ch0z'].max()], 
-        #                           mode='lines', 
-        #                           line=dict(color='red', width=2, dash='dash'),
-        #                           name='theoretical steps'))
+        fig1.add_vline(x=step, line_dash = 'dash', line_color = step_color, opacity = 0.5)
 
     fig1.update_traces(marker_size=4)
     fig1.update_layout(title="Signal and Steps")
+    fig1.update_yaxes(title = 'Accumulated charge during chunk time (nC)')
+    fig1.update_xaxes(title = 'time (s)')
 
     return fig1
-
-
-def filename_change():
-    st.session_state.filename_change = True
 
 
 def align_signal(dfg, step_difference, add: bool = True):
@@ -212,92 +161,133 @@ def align_signal(dfg, step_difference, add: bool = True):
         dfg['time'] = dfg['time'] - step_difference
 
     return dfg 
- 
 
-def main(filelist):
-    filename = st.multiselect(label='Select Files', 
-                              options=filelist,
-                              key="selected_file",
-                              max_selections=2,
-                              placeholder="Max 2 Files",
-                              on_change=filename_change,
-                              )
+#Run main
 
-    if st.session_state.filename_change and len(filename) == 2:
-        df1 = read_dataframe(filename[0])
-        df2 = read_dataframe(filename[1])
+if 'dffiles' not in st.session_state:
+   dffiles = get_list_of_files('vcubrachy')
+   st.session_state.dffiles = dffiles
+else:
+    dffiles = st.session_state.dffiles
 
-        st.session_state.df1 = df1
-        st.session_state.df2 = df2
+if 'chunk' not in st.session_state:
+    st.session_state.chunk = 400
+
+chunk = st.slider(label="Select Chunk Size", 
+                       min_value=10,
+                       max_value=450,
+                       value=st.session_state.chunk,
+                       step=50,
+                       key = 'chunk'
+                       )
+
+filename = st.multiselect(label='Select Files', 
+                          options=dffiles.file,
+                          max_selections=2,
+                          placeholder="Max 2 Files",
+                          )
+
+if len(filename) == 2:
+    dfz1, dfg1 = read_dataframe(filename[0], chunk)
+    dfz2, dfg2 = read_dataframe(filename[1], chunk)
+
+    st.write("Dwell Finder")
+    tab1, tab2 = st.tabs(["Methods", "Options"])
+    with tab1:
+        col_scipy, col_ruptures = st.columns(2)
+        with col_scipy:
+            displ_scipy_method = st.toggle(label="Scipy Method", 
+                                    value=True, 
+                                    )
+        with col_ruptures:
+            displ_ruptures_method = st.toggle(label="Ruptures Method (Coming soon)", 
+                                        value=False, 
+                                        disabled=True)
+    with tab2:
+        opt_col1, opt_col2 = st.columns(2)
+        with opt_col1:
+            st.write("Scipy Options")
+            displ_placeholder = st.empty()
+            displ_placeholder2 = st.empty()
+            if st.button(label="Default values", key="displ_default_button"):
+                st.session_state.displ_scipy_height = 5
+                st.session_state.displ_scipy_distance = 10
+
+            displ_scipy_height = displ_placeholder.number_input(label="Heigth", 
+                                            min_value=0,
+                                            max_value=30,
+                                            value = 5,
+                                            key="displ_scipy_height",
+                                            step=1)
+            displ_scipy_distance = displ_placeholder2.number_input(label="Distance", 
+                                            min_value=0,
+                                            max_value=30,
+                                            value = 10,
+                                            key="displ_scipy_distance",
+                                            step=1)
+        with opt_col2:
+            st.write("Ruptures Options (Coming soon)")
+
+    #Find steps
+    if displ_scipy_method and displ_scipy_height or displ_scipy_distance:
+        step_times1 = scipy_locate_steps(dfg1, displ_scipy_height, displ_scipy_distance)
+        step_times2 = scipy_locate_steps(dfg2, displ_scipy_height, displ_scipy_distance)
+    else:
+        pass
+        #ruptures_locate_steps(dfg)
+
+    step_difference = step_times1[0] - step_times2[0]
+    if step_difference > 0:
+        # Subtract to dfg1
+        step_times1 -= step_difference
+        dfg1 = align_signal(dfg1, step_difference, add=False)
+    else:
+        # Add to dfg2
+        step_times2 += step_difference
+        dfg2 = align_signal(dfg2, step_difference, add=True)
+
+    #st.write(step_difference)
+
+    step_selection = st.radio(label="Vertical Step Selection",
+                              options=[f"File: {filename[0]}", f"File: {filename[1]}"],
+                              horizontal=True)
+    if step_selection == f"File: {filename[0]}":
+        step_times = step_times1
+        step_color= "royalblue"
+    else:
+        step_times = step_times2
+        step_color = "darkred"
     
-        dfz1, dfg1 = calculate_zeros(st.session_state.df1)
-        dfz2, dfg2 = calculate_zeros(st.session_state.df2)
+    fig1 = plotly_fig1(dfg1, dfg2, step_times, step_color)
 
-        #Find steps
-        dfz1, step_times1, theoretical_steps1 = locate_steps(dfg1)
-        dfz2, step_times2, theoretical_steps2 = locate_steps(dfg2)
-
-        step_difference = step_times1[0] - step_times2[0]
-        if step_difference > 0:
-            # Subtract to dfg1
-            theoretical_steps = theoretical_steps2
-            step_times = step_times2
-            dfg1 = align_signal(dfg1, step_difference, add=False)
-        else:
-            # Add to dfg2
-            theoretical_steps = theoretical_steps1
-            step_times = step_times1
-            dfg2 = align_signal(dfg2, step_difference, add=True)
-
-        #st.write(step_difference)
-
-        fig1 = plotly_fig1(dfg1, dfg2, step_times, theoretical_steps)
-
-        st.plotly_chart(fig1, theme="streamlit")
-        
-        st.write("Step Integrals for File: " + filename[0])
-        col1, col2 = st.columns(2)
-        with col1:
-            calc_toogle = st.toggle(label="Calculate steps (Green)", value=True,)
-            if calc_toogle:
-                step_sum_df = calculate_step_integral(dfz1, step_times1)
-                st.write("Calculated Step Integral Table")
-                st.dataframe(step_sum_df)
-        with col2:
-            thry_toggle = st.toggle(label="Calculate theoretical steps (Red)", value=False,)
-            if thry_toggle:
-                step_sum_df = calculate_step_integral(dfz1, step_times1, calculate_theoretical=True)
-                st.write("Theoretical Step Integral Table")
-                st.dataframe(step_sum_df)
-        
-        st.write("Step Integrals for File: " + filename[1])
-        col3, col4 = st.columns(2)
-        with col3:
-            calc_toogle2 = st.toggle(label="Calculate steps (Green)", value=True, key="ctoogle2")
-            if calc_toogle2:
-                step_sum_df1 = calculate_step_integral(dfz2, step_times2)
-                st.write("Calculated Step Integral Table")
-                st.dataframe(step_sum_df1)
-        with col4:
-            thry_toggle2 = st.toggle(label="Calculate theoretical steps (Red)", value=False, key="ttoogle2")
-            if thry_toggle2:
-                step_sum_df2 = calculate_step_integral(dfz2, step_times2, calculate_theoretical=True)
-                st.write("Theoretical Step Integral Table")
-                st.dataframe(step_sum_df2)
-
-
-
-if __name__== "__main__":
-    times = time.time()
-    #file_list = glob('vcubrachy*all*.csv')
-    #file_list = [i for i in filenames if 'all' in i]
-    init_variables()
-    dffiles = load_files()
-    main(filelist = dffiles)
-    timee = time.time()
-
-    print()
-    print(timee-times)
-    print()
-    #import cProfile
-    #cProfile.run("main()")
+    st.plotly_chart(fig1, theme="streamlit")
+    
+    st.write("Step Integrals for File: " + filename[0])
+    col1, col2 = st.columns(2)
+    with col1:
+        calc_toogle = st.toggle(label="Calculate steps (Green)", value=True,)
+        if calc_toogle:
+            step_sum_df = calculate_step_integral(dfz1, step_times1)
+            st.write("Calculated Step Integral Table")
+            st.dataframe(step_sum_df)
+    with col2:
+        thry_toggle = st.toggle(label="Calculate theoretical steps (Red)", value=False,)
+        if thry_toggle:
+            step_sum_df = calculate_step_integral(dfz1, step_times1, calculate_theoretical=True)
+            st.write("Theoretical Step Integral Table")
+            st.dataframe(step_sum_df)
+    
+    st.write("Step Integrals for File: " + filename[1])
+    col3, col4 = st.columns(2)
+    with col3:
+        calc_toogle2 = st.toggle(label="Calculate steps (Green)", value=True, key="ctoogle2")
+        if calc_toogle2:
+            step_sum_df1 = calculate_step_integral(dfz2, step_times2)
+            st.write("Calculated Step Integral Table")
+            st.dataframe(step_sum_df1)
+    with col4:
+        thry_toggle2 = st.toggle(label="Calculate theoretical steps (Red)", value=False, key="ttoogle2")
+        if thry_toggle2:
+            step_sum_df2 = calculate_step_integral(dfz2, step_times2, calculate_theoretical=True)
+            st.write("Theoretical Step Integral Table")
+            st.dataframe(step_sum_df2)
