@@ -17,7 +17,7 @@ def get_list_of_files(customer):
     response = s3.list_objects_v2(Bucket=f'{customer}')
 
     filenames = [file['Key'] for file in response.get('Contents', [])][1:]
-    filenames = glob(f'{customer}*.csv')
+    #filenames = glob(f'{customer}*.csv')
 
     dates = []
     notes = []

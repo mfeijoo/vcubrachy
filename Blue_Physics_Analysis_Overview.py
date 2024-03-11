@@ -41,9 +41,9 @@ def get_list_of_files(customer):
 
 #Take a quick look at the raw data
 def read_dataframe(file):
-    #path = f's3://vcubrachy/{file}'
-    #df = pd.read_csv(path, skiprows = 4)
-    df = pd.read_csv(file, skiprows = 4)
+    path = f's3://vcubrachy/{file}'
+    df = pd.read_csv(path, skiprows = 4)
+    #;df = pd.read_csv(file, skiprows = 4)
 
     #Calculate zeros
     last_time = df.iloc[-1,1]

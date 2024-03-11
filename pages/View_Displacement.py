@@ -20,14 +20,14 @@ def get_list_of_files(customer):
 
     filenamesbad = [file['Key'] for file in response.get('Contents', [])][1:]
     filenames = [i for i in filenamesbad if 'all' in i]
-    filenames = glob(f'{customer}*.csv')
+    #filenames = glob(f'{customer}*.csv')
 
     dates = []
     notes = []
 
     for filename in filenames:
-        #with open (f's3://vcubrachy/{filename}') as filenow:
-        with open (filename) as filenow:
+        with open (f's3://vcubrachy/{filename}') as filenow:
+        #with open (filename) as filenow:
             datenow = filenow.readline()[11:]
             dates.append(datenow)
             notenow = filenow.readline()[7:]
