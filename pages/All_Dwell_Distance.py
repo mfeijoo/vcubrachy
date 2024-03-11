@@ -22,8 +22,8 @@ def get_list_of_files(customer):
     s3 = boto3.client('s3')
     response = s3.list_objects_v2(Bucket='vcubrachy')
 
-    file_list = [file['Key'] for file in response.get('Contents', [])][1:]
-    #file_list = glob(f'{customer}*.csv')
+    file_list = [file['Key'] for file in response.get('Contents', [])]
+    file_list = glob(f'{customer}*.csv')
 
     dates = []
     notes = []
